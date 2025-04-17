@@ -1,0 +1,159 @@
+pipeline {
+    agent any
+    environment {
+        ZONE = "us-central1-c"
+        PROJECT_ID = "plated-epigram-452709-h6"
+        CLUSTER_NAME = "canary-cluster"
+        GOOGLE_APPLICATION_CREDENTIALS = credentials('gcp-key')
+        IMAGE_NAME = "canary-deploy"
+        GREEN_DEPLOY = "k8s/canary.yaml"
+        BLUE_DEPLOY = "k8s/old.yaml"
+        SVC = "k8s/svc.yaml"
+        VIRTUALSERVICE = "k8s/virtual.yaml"
+        DESTINATIONRULE = "k8s/rule.yaml"
+    }
+
+    stages {
+        stage('GCP Login') {
+            steps {
+                withCredentials([file(credentialsId: 'gcp-key', variable: 'GOOGLE_APPLICATION_CREDENTIALS')]) {
+                    sh '''
+                    gcloud auth activate-service-account --key-file=$GOOGLE_APPLICATION_CREDENTIALS
+                    gcloud config set project $PROJECT_ID
+                    '''
+                }
+            }
+        }
+
+        stage('Create GKE Cluster') {
+            steps {
+                script {
+                    dir('terraform') {
+                        sh '''
+                        terraform init
+                        terraform plan
+                        terraform apply --auto-approve
+                        '''
+                    }
+                }
+            }
+        }
+
+        stage('Install Istio') {
+            steps {
+                script {
+                    sh '''
+                    curl -L https://istio.io/downloadIstio | sh -
+                    export PATH=$PWD/istio-*/bin:$PATH
+                    istioctl install --set profile=default -y
+                    kubectl label namespace default istio-injection=enabled
+                    '''
+                }
+            }
+        }
+
+        stage('Build Docker Images') {
+            steps {
+                script {
+                    sh '''
+                    # Build Blue and Green Docker images
+                    docker build -t $IMAGE_NAME-blue -f app/blue/Dockerfile app/blue
+                    docker build -t $IMAGE_NAME-green -f app/green/Dockerfile app/green
+                    
+                    # Tag with build number
+                    docker tag $IMAGE_NAME-blue sukanya996/$IMAGE_NAME:blue-$BUILD_NUMBER
+                    docker tag $IMAGE_NAME-green sukanya996/$IMAGE_NAME:green-$BUILD_NUMBER
+                    '''
+                }
+            }
+        }
+
+        stage('Push Docker Images') {
+            steps {
+                script {
+                    sh '''
+                    # Push Docker images to Docker Hub
+                    docker push sukanya996/$IMAGE_NAME:blue-$BUILD_NUMBER
+                    docker push sukanya996/$IMAGE_NAME:green-$BUILD_NUMBER
+                    '''
+                }
+            }
+        }
+
+        stage('Get GKE Credentials') {
+            steps {
+                script {
+                    sh '''
+                    gcloud container clusters get-credentials $CLUSTER_NAME --zone $ZONE --project $PROJECT_ID
+                    '''
+                }
+            }
+        }
+
+        stage('Deploy Blue and Green Apps') {
+            steps {
+                script {
+                    sh '''
+                    kubectl apply -f $BLUE_DEPLOY
+                    kubectl apply -f $GREEN_DEPLOY
+                    kubectl apply -f $SVC
+                    
+                    # Wait for deployments to stabilize
+                    sleep 30
+                    kubectl get svc
+                    '''
+                }
+            }
+        }
+
+        stage('Create Istio VirtualService') {
+            steps {
+                script {
+                    sh '''
+                    kubectl apply -f $VIRTUALSERVICE
+                    '''
+                }
+            }
+        }
+
+        stage('Create Istio DestinationRule') {
+            steps {
+                script {
+                    sh '''
+                    kubectl apply -f $DESTINATIONRULE
+                    '''
+                }
+            }
+        }
+
+        stage('Gradually Switch Traffic to Green (Canary)') {
+            steps {
+                script {
+                    sh '''
+                    kubectl patch virtualservice flask-service -p '{"spec": {"http": [{"route": [{"destination": {"host": "flask-service", "subset": "blue"}} ,{"destination": {"host": "flask-service", "subset": "green"}}]}]}}'
+                    '''
+                }
+            }
+        }
+
+        stage('Cleanup Blue Deployment') {
+            steps {
+                script {
+                    sh '''
+                    kubectl delete -f $BLUE_DEPLOY || echo "No blue deployment found"
+                    '''
+                }
+            }
+        }
+
+        stage('Final Check') {
+            steps {
+                script {
+                    sh '''
+                    kubectl get svc
+                    '''
+                }
+            }
+        }
+    }
+}
