@@ -42,17 +42,6 @@ pipeline {
                 }
             }
         }
-
-        stage('Export GCP Vars') {
-            steps {
-                script {
-                    env.PROJECT_ID = readFile('project_id.txt').trim()
-                    env.CLUSTER_NAME = readFile('cluster_name.txt').trim()
-                    env.ZONE = readFile('zone.txt').trim()
-                }
-            }
-        }
-
         stage('Install Istio') {
             steps {
                 sh '''
