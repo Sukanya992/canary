@@ -60,18 +60,17 @@ stage('Check GKE Connectivity') {
     }
 }
 
-   stage('Install Istio') {
+  stage('Install Istio') {
             steps {
                 script {
                     echo 'Downloading and Installing Istio...'
                     sh '''
                     # Download Istio
                     curl -L https://istio.io/downloadIstio | ISTIO_VERSION=${ISTIO_VERSION} sh -
-                    cd ${ISTIO_PATH}
-
+                    
                     # Add Istio binary directory to PATH
-                    export PATH=$PWD/bin:$PATH
-
+                    export PATH=${WORKSPACE}/istio-${ISTIO_VERSION}/bin:$PATH
+                    
                     # Check Kubernetes connectivity
                     echo "Checking Kubernetes cluster connectivity..."
                     kubectl get nodes || { echo "Cannot connect to the Kubernetes cluster"; exit 1; }
@@ -101,8 +100,6 @@ stage('Check GKE Connectivity') {
                 }
             }
         }
-    
-
 
         stage('Build Docker Images') {
             steps {
