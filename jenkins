@@ -38,6 +38,14 @@ pipeline {
                 }
             }
         }
+stage('Check GKE Connectivity') {
+    steps {
+        sh '''
+        # Verify connectivity to the Kubernetes cluster
+        kubectl get nodes || { echo "Cannot connect to the GKE cluster"; exit 1; }
+        '''
+    }
+}
 
         stage('Install Istio') {
     steps {
@@ -51,14 +59,25 @@ pipeline {
         # Add Istio binary directory to PATH
         export PATH=$PWD/bin:$PATH
 
-        # Verify istioctl is available
-        istioctl version
+        # Check if we can communicate with the GKE cluster
+        echo "Checking Kubernetes cluster connectivity..."
+        kubectl get nodes || { echo "Cannot connect to the Kubernetes cluster"; exit 1; }
 
-        # Install Istio with the default profile
-        istioctl install --set profile=default -y
+        # Check Istio version compatibility
+        echo "Checking Istio installation prerequisites..."
+        istioctl version || { echo "Istioctl could not retrieve Kubernetes version"; exit 1; }
+
+        # Install Istio if not already installed
+        if ! kubectl get namespace istio-system > /dev/null 2>&1; then
+            echo "Installing Istio..."
+            istioctl install --set profile=default -y
+        else
+            echo "Istio is already installed"
+        fi
         '''
     }
 }
+
 
 
         stage('Build Docker Images') {
