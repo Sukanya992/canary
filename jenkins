@@ -1,52 +1,52 @@
 pipeline {
     agent any
     environment {
-        GOOGLE_APPLICATION_CREDENTIALS = credentials('gcp-key') // Service Account JSON in Jenkins
-        IMAGE_NAME = "canary-deploy"
-
-        GREEN_DEPLOY = "k8s/canary.yaml"
-        BLUE_DEPLOY  = "k8s/old.yaml"
-        SVC          = "k8s/svc.yaml"
-        VIRTUALSERVICE = "k8s/virtual.yaml"
-        DESTINATIONRULE = "k8s/rule.yaml"
+        ZONE = "us-central1-c"
+        CLUSTER_NAME = "canary-cluster"
+        IMAGE_NAME = "bule-green"
+        GOOGLE_APPLICATION_CREDENTIALS = credentials('gcp-key')
     }
 
     stages {
-        stage('GCP Login') {
+        stage('Docker Login') {
             steps {
-                withCredentials([file(credentialsId: 'gcp-key', variable: 'GOOGLE_APPLICATION_CREDENTIALS')]) {
-                    sh '''
-                    # Authenticate with Google Cloud
-                    echo "Using credentials from: $GOOGLE_APPLICATION_CREDENTIALS"
-                    gcloud auth activate-service-account --key-file=$GOOGLE_APPLICATION_CREDENTIALS
-                    
-                    # Retrieve GKE credentials (IMPORTANT)
-                    gcloud container clusters get-credentials $CLUSTER_NAME --zone $ZONE
-                    '''
+                withCredentials([usernamePassword(credentialsId: 'docker-hub',
+                                                  usernameVariable: 'DOCKER_USER',
+                                                  passwordVariable: 'DOCKER_PASS')]) {
+                    sh 'echo "$DOCKER_PASS" | docker login -u "$DOCKER_USER" --password-stdin'
                 }
             }
         }
-stage('Terraform Apply (Cluster)') {
+
+        stage('GCP Auth & Terraform Apply') {
             steps {
-                script {
-                    // Change to the directory containing the Terraform configuration files
+                withCredentials([file(credentialsId: 'gcp-key', variable: 'GOOGLE_APPLICATION_CREDENTIALS')]) {
                     dir('terraform') {
                         sh '''
+                        gcloud auth activate-service-account --key-file=$GOOGLE_APPLICATION_CREDENTIALS
                         terraform init
-                        terraform plan
-                        terraform apply --auto-approve
+                        terraform apply -auto-approve
                         '''
                     }
                 }
             }
         }
+
+        stage('Get GKE Credentials') {
+            steps {
+                sh '''
+                gcloud container clusters get-credentials $CLUSTER_NAME --zone $ZONE
+                '''
+            }
+        }
+
         stage('Install Istio') {
             steps {
                 sh '''
-                curl -L https://istio.io/downloadIstio | ISTIO_VERSION=1.21.0 sh -
-                cd istio-1.21.0
-                export PATH=$PWD/bin:$PATH
-                istioctl install --set profile=default -y
+                curl -L https://istio.io/downloadIstio | sh -
+                ISTIO_DIR=$(find . -maxdepth 1 -type d -name "istio-*")
+                export PATH="$PATH:$ISTIO_DIR/bin"
+                $ISTIO_DIR/bin/istioctl install --set profile=default -y
                 '''
             }
         }
@@ -55,9 +55,8 @@ stage('Terraform Apply (Cluster)') {
             steps {
                 sh '''
                 docker build -t $IMAGE_NAME-blue -f app/blue/Dockerfile app/blue
-                docker build -t $IMAGE_NAME-green -f app/green/Dockerfile app/green
-
                 docker tag $IMAGE_NAME-blue sukanya996/$IMAGE_NAME:blue-$BUILD_NUMBER
+                docker build -t $IMAGE_NAME-green -f app/green/Dockerfile app/green
                 docker tag $IMAGE_NAME-green sukanya996/$IMAGE_NAME:green-$BUILD_NUMBER
                 '''
             }
@@ -72,54 +71,39 @@ stage('Terraform Apply (Cluster)') {
             }
         }
 
-        stage('Deploy Blue and Green Versions') {
+        stage('Update Deployment Files') {
             steps {
                 sh '''
-                kubectl apply -f $BLUE_DEPLOY
-                kubectl apply -f $GREEN_DEPLOY
-                kubectl apply -f $SVC
-                sleep 20
+                sed -i "s|image: .*blue.*|image: sukanya996/${IMAGE_NAME}:blue-${BUILD_NUMBER}|" k8s/blue-deployment.yaml
+                sed -i "s|image: .*green.*|image: sukanya996/${IMAGE_NAME}:green-${BUILD_NUMBER}|" k8s/green-deployment.yaml
+                '''
+            }
+        }
+
+        stage('Deploy Blue and Green Apps') {
+            steps {
+                sh '''
+                kubectl apply -f k8s/blue-deployment.yaml
+                kubectl apply -f k8s/green-deployment.yaml
+                '''
+            }
+        }
+
+        stage('Create Istio Resources') {
+            steps {
+                sh '''
+                kubectl apply -f k8s/destination-rule.yaml
+                kubectl apply -f k8s/virtual-service.yaml
+                '''
+            }
+        }
+
+        stage('Final Check') {
+            steps {
+                sh '''
+                kubectl get pods
                 kubectl get svc
                 '''
-            }
-        }
-
-        stage('Apply Istio Routing') {
-            steps {
-                sh '''
-                kubectl apply -f $DESTINATIONRULE
-                kubectl apply -f $VIRTUALSERVICE
-                '''
-            }
-        }
-
-        stage('Canary Traffic Shifting') {
-            steps {
-                script {
-                    def shifts = [90, 70, 50, 30, 10, 0]
-                    for (int i = 0; i < shifts.size(); i++) {
-                        def blue = shifts[i]
-                        def green = 100 - blue
-                        sh """
-                        echo "Traffic shift: blue=${blue}%, green=${green}%"
-                        sed -e 's/blue_weight:.*/blue_weight: ${blue}/' -e 's/green_weight:.*/green_weight: ${green}/' k8s/virtual-template.yaml > k8s/virtual.yaml
-                        kubectl apply -f k8s/virtual.yaml
-                        sleep 10
-                        """
-                    }
-                }
-            }
-        }
-
-        stage('Cleanup Blue') {
-            steps {
-                sh 'kubectl delete -f $BLUE_DEPLOY || echo "Already deleted."'
-            }
-        }
-
-        stage('Final Verification') {
-            steps {
-                sh 'kubectl get all'
             }
         }
     }
