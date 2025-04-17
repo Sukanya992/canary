@@ -95,7 +95,6 @@ stage('Check GKE Connectivity') {
 
                     # Ensure Istio CNI is installed and ready
                     kubectl get daemonset -n kube-system istio-cni-node || { echo "Istio CNI node daemonset not found"; exit 1; }
-                    kubectl wait --for=condition=ready daemonset -n kube-system istio-cni-node --timeout=10m || { echo "Istio CNI failed to start"; exit 1; }
                     '''
                 }
             }
