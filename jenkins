@@ -96,12 +96,12 @@ stage('Check GKE Connectivity') {
                 script {
                     sh '''
                     # Build Blue and Green Docker images
-                    docker build -t $IMAGE_NAME-blue -f app/old/Dockerfile app/blue
-                    docker build -t $IMAGE_NAME-green -f app/canary/Dockerfile app/green
+                    docker build -t $IMAGE_NAME-old -f app/old/Dockerfile app/blue
+                    docker build -t $IMAGE_NAME-canary -f app/canary/Dockerfile app/green
                     
                     # Tag with build number
-                    docker tag $IMAGE_NAME-blue sukanya996/$IMAGE_NAME:old-$BUILD_NUMBER
-                    docker tag $IMAGE_NAME-green sukanya996/$IMAGE_NAME:canary-$BUILD_NUMBER
+                    docker tag $IMAGE_NAME-old sukanya996/$IMAGE_NAME:old-$BUILD_NUMBER
+                    docker tag $IMAGE_NAME-canary sukanya996/$IMAGE_NAME:canary-$BUILD_NUMBER
                     '''
                 }
             }
