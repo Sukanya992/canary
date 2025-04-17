@@ -13,31 +13,37 @@ pipeline {
         DESTINATIONRULE = "k8s/rule.yaml"
     }
 
-    stages {
-        stage('GCP Login') {
-            steps {
-                withCredentials([file(credentialsId: 'gcp-key', variable: 'GOOGLE_APPLICATION_CREDENTIALS')]) {
-                    sh '''
-                    gcloud auth activate-service-account --key-file=$GOOGLE_APPLICATION_CREDENTIALS
-                    gcloud config set project $PROJECT_ID
-                    '''
-                }
-            }
-        }
+    stage('GCP Auth, Terraform & Cluster Ready') {
+    steps {
+        withCredentials([file(credentialsId: 'gcp-key', variable: 'GOOGLE_APPLICATION_CREDENTIALS')]) {
+            dir('terraform') {
+                sh '''
+                echo " Authenticating with GCP"
+                gcloud auth activate-service-account --key-file=$GOOGLE_APPLICATION_CREDENTIALS
+                gcloud config set project $(terraform output -raw project_id)
 
-        stage('Create GKE Cluster') {
-            steps {
-                script {
-                    dir('terraform') {
-                        sh '''
-                        terraform init
-                        terraform plan
-                        terraform apply --auto-approve
-                        '''
-                    }
-                }
+                echo "Running Terraform"
+                terraform init
+                terraform apply -auto-approve
+
+                echo "Waiting for GKE cluster to be ready..."
+                CLUSTER_NAME=$(terraform output -raw cluster_name)
+                ZONE=$(terraform output -raw zone)
+                until gcloud container clusters describe "$CLUSTER_NAME" --zone "$ZONE" >/dev/null 2>&1; do
+                    echo "Cluster not ready yet. Sleeping 10s..."
+                    sleep 10
+                done
+
+                echo "Cluster ready. Fetching credentials..."
+                gcloud container clusters get-credentials "$CLUSTER_NAME" --zone "$ZONE"
+                kubectl get nodes
+                '''
             }
         }
+    }
+}
+
+
 
         stage('Install Istio') {
             steps {
