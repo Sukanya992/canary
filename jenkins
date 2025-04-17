@@ -58,7 +58,7 @@ stage('Check GKE Connectivity') {
     }
 }
 
-        stage('Install Istio') {
+   stage('Install Istio') {
     steps {
         sh '''
         # Download Istio
@@ -70,24 +70,26 @@ stage('Check GKE Connectivity') {
         # Add Istio binary directory to PATH
         export PATH=$PWD/bin:$PATH
 
-        # Check if we can communicate with the GKE cluster
+        # Check Kubernetes connectivity
         echo "Checking Kubernetes cluster connectivity..."
         kubectl get nodes || { echo "Cannot connect to the Kubernetes cluster"; exit 1; }
 
-        # Check Istio version compatibility
+        # Check Istio CLI version
         echo "Checking Istio installation prerequisites..."
-        istioctl version || { echo "Istioctl could not retrieve Kubernetes version"; exit 1; }
+        istioctl version --remote=false || { echo "Istioctl not working"; exit 1; }
 
-        # Install Istio if not already installed
-        if ! kubectl get namespace istio-system > /dev/null 2>&1; then
-            echo "Installing Istio..."
-            istioctl install --set profile=default -y
+        # Install or Reinstall Istio
+        echo "Checking for existing Istio pods..."
+        if ! kubectl get pods -n istio-system 2>/dev/null | grep -q 'istiod'; then
+            echo "Installing or re-installing Istio..."
+            istioctl install --set profile=demo -y
         else
-            echo "Istio is already installed"
+            echo "Istio is already running"
         fi
         '''
     }
 }
+
 
 
 
@@ -96,8 +98,8 @@ stage('Check GKE Connectivity') {
                 script {
                     sh '''
                     # Build Blue and Green Docker images
-                    docker build -t $IMAGE_NAME-old -f app/old/Dockerfile app/blue
-                    docker build -t $IMAGE_NAME-canary -f app/canary/Dockerfile app/green
+                    docker build -t $IMAGE_NAME-old -f app/old/Dockerfile app/old
+                    docker build -t $IMAGE_NAME-canary -f app/canary/Dockerfile app/canary
                     
                     # Tag with build number
                     docker tag $IMAGE_NAME-old sukanya996/$IMAGE_NAME:old-$BUILD_NUMBER
