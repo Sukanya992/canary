@@ -14,103 +14,147 @@ pipeline {
     }
 
     stages {
-        stage('Docker Login') {
+        stage('GCP Login') {
             steps {
-                withCredentials([usernamePassword(credentialsId: 'docker-hub',
-                                                  usernameVariable: 'DOCKER_USER',
-                                                  passwordVariable: 'DOCKER_PASS')]) {
-                    sh 'echo "$DOCKER_PASS" | docker login -u "$DOCKER_USER" --password-stdin'
+                withCredentials([file(credentialsId: 'gcp-key', variable: 'GOOGLE_APPLICATION_CREDENTIALS')]) {
+                    sh '''
+                    gcloud auth activate-service-account --key-file=$GOOGLE_APPLICATION_CREDENTIALS
+                    gcloud config set project $PROJECT_ID
+                    '''
                 }
             }
         }
 
-        stage('GCP Auth & Terraform Apply') {
+        stage('Create GKE Cluster') {
             steps {
-                withCredentials([file(credentialsId: 'gcp-key', variable: 'GOOGLE_APPLICATION_CREDENTIALS')]) {
+                script {
                     dir('terraform') {
                         sh '''
-                        gcloud auth activate-service-account --key-file=$GOOGLE_APPLICATION_CREDENTIALS
                         terraform init
-                        terraform apply -auto-approve
+                        terraform plan
+                        terraform apply --auto-approve
                         '''
                     }
                 }
             }
         }
 
-        stage('Get GKE Credentials') {
-            steps {
-                sh '''
-                gcloud container clusters get-credentials $CLUSTER_NAME --zone $ZONE
-                '''
-            }
-        }
-
         stage('Install Istio') {
             steps {
-                sh '''
-                curl -L https://istio.io/downloadIstio | sh -
-                ISTIO_DIR=$(find . -maxdepth 1 -type d -name "istio-*")
-                export PATH="$PATH:$ISTIO_DIR/bin"
-                $ISTIO_DIR/bin/istioctl install --set profile=default -y
-                '''
+                script {
+                    sh '''
+                    curl -L https://istio.io/downloadIstio | sh -
+                    export PATH=$PWD/istio-*/bin:$PATH
+                    istioctl install --set profile=default -y
+                    kubectl label namespace default istio-injection=enabled
+                    '''
+                }
             }
         }
 
         stage('Build Docker Images') {
             steps {
-                sh '''
-                docker build -t $IMAGE_NAME-blue -f app/blue/Dockerfile app/blue
-                docker tag $IMAGE_NAME-blue sukanya996/$IMAGE_NAME:blue-$BUILD_NUMBER
-                docker build -t $IMAGE_NAME-green -f app/green/Dockerfile app/green
-                docker tag $IMAGE_NAME-green sukanya996/$IMAGE_NAME:green-$BUILD_NUMBER
-                '''
+                script {
+                    sh '''
+                    # Build Blue and Green Docker images
+                    docker build -t $IMAGE_NAME-blue -f app/blue/Dockerfile app/blue
+                    docker build -t $IMAGE_NAME-green -f app/green/Dockerfile app/green
+                    
+                    # Tag with build number
+                    docker tag $IMAGE_NAME-blue sukanya996/$IMAGE_NAME:blue-$BUILD_NUMBER
+                    docker tag $IMAGE_NAME-green sukanya996/$IMAGE_NAME:green-$BUILD_NUMBER
+                    '''
+                }
             }
         }
 
         stage('Push Docker Images') {
             steps {
-                sh '''
-                docker push sukanya996/$IMAGE_NAME:blue-$BUILD_NUMBER
-                docker push sukanya996/$IMAGE_NAME:green-$BUILD_NUMBER
-                '''
+                script {
+                    sh '''
+                    # Push Docker images to Docker Hub
+                    docker push sukanya996/$IMAGE_NAME:blue-$BUILD_NUMBER
+                    docker push sukanya996/$IMAGE_NAME:green-$BUILD_NUMBER
+                    '''
+                }
             }
         }
 
-        stage('Update Deployment Files') {
+        stage('Get GKE Credentials') {
             steps {
-                sh '''
-                sed -i "s|image: .*blue.*|image: sukanya996/${IMAGE_NAME}:blue-${BUILD_NUMBER}|" k8s/blue-deployment.yaml
-                sed -i "s|image: .*green.*|image: sukanya996/${IMAGE_NAME}:green-${BUILD_NUMBER}|" k8s/green-deployment.yaml
-                '''
+                script {
+                    sh '''
+                    gcloud container clusters get-credentials $CLUSTER_NAME --zone $ZONE --project $PROJECT_ID
+                    '''
+                }
             }
         }
 
         stage('Deploy Blue and Green Apps') {
             steps {
-                sh '''
-                kubectl apply -f k8s/blue-deployment.yaml
-                kubectl apply -f k8s/green-deployment.yaml
-                '''
+                script {
+                    sh '''
+                    kubectl apply -f $BLUE_DEPLOY
+                    kubectl apply -f $GREEN_DEPLOY
+                    kubectl apply -f $SVC
+                    
+                    # Wait for deployments to stabilize
+                    sleep 30
+                    kubectl get svc
+                    '''
+                }
             }
         }
 
-        stage('Create Istio Resources') {
+        stage('Create Istio VirtualService') {
             steps {
-                sh '''
-                kubectl apply -f k8s/destination-rule.yaml
-                kubectl apply -f k8s/virtual-service.yaml
-                '''
+                script {
+                    sh '''
+                    kubectl apply -f $VIRTUALSERVICE
+                    '''
+                }
+            }
+        }
+
+        stage('Create Istio DestinationRule') {
+            steps {
+                script {
+                    sh '''
+                    kubectl apply -f $DESTINATIONRULE
+                    '''
+                }
+            }
+        }
+
+        stage('Gradually Switch Traffic to Green (Canary)') {
+            steps {
+                script {
+                    sh '''
+                    kubectl patch virtualservice flask-service -p '{"spec": {"http": [{"route": [{"destination": {"host": "flask-service", "subset": "blue"}} ,{"destination": {"host": "flask-service", "subset": "green"}}]}]}}'
+                    '''
+                }
+            }
+        }
+
+        stage('Cleanup Blue Deployment') {
+            steps {
+                script {
+                    sh '''
+                    kubectl delete -f $BLUE_DEPLOY || echo "No blue deployment found"
+                    '''
+                }
             }
         }
 
         stage('Final Check') {
             steps {
-                sh '''
-                kubectl get pods
-                kubectl get svc
-                '''
+                script {
+                    sh '''
+                    kubectl get svc
+                    '''
+                }
             }
         }
     }
 }
+
