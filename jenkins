@@ -12,31 +12,29 @@ pipeline {
     }
 
     stages {
-        stage('Authenticate & Terraform Apply') {
+        stage('GCP Login') {
             steps {
                 withCredentials([file(credentialsId: 'gcp-key', variable: 'GOOGLE_APPLICATION_CREDENTIALS')]) {
+                    sh '''
+                    # Authenticate with Google Cloud
+                    echo "Using credentials from: $GOOGLE_APPLICATION_CREDENTIALS"
+                    gcloud auth activate-service-account --key-file=$GOOGLE_APPLICATION_CREDENTIALS
+                    
+                    # Retrieve GKE credentials (IMPORTANT)
+                    gcloud container clusters get-credentials $CLUSTER_NAME --zone $ZONE
+                    '''
+                }
+            }
+        }
+stage('Terraform Apply (Cluster)') {
+            steps {
+                script {
+                    // Change to the directory containing the Terraform configuration files
                     dir('terraform') {
                         sh '''
-                        echo "Authenticating with GCP"
-                        gcloud auth activate-service-account --key-file=$GOOGLE_APPLICATION_CREDENTIALS
-
-                        echo "Running Terraform"
                         terraform init
-                        terraform apply -auto-approve
-
-                        echo "Fetching outputs"
-                        export PROJECT_ID=$(terraform output -raw project_id)
-                        export CLUSTER_NAME=$(terraform output -raw cluster_name)
-                        export ZONE=$(terraform output -raw zone)
-
-                        echo "Fetching GKE Credentials"
-                        gcloud config set project $PROJECT_ID
-                        gcloud container clusters get-credentials $CLUSTER_NAME --zone $ZONE
-                        kubectl get nodes
-
-                        echo "$PROJECT_ID" > ../project_id.txt
-                        echo "$CLUSTER_NAME" > ../cluster_name.txt
-                        echo "$ZONE" > ../zone.txt
+                        terraform plan
+                        terraform apply --auto-approve
                         '''
                     }
                 }
