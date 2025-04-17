@@ -178,7 +178,7 @@ stage('Check GKE Connectivity') {
             steps {
                 script {
                     sh '''
-kubectl patch virtualservice flask-service -p '{"spec": {"http": [{"route": [{"destination": {"host": "flask-service", "subset": "old"}} ,{"destination": {"host": "flask-service", "subset": "canary"}}]}]}}' --type=json
+kubectl patch virtualservice flask-service -p '[{"op": "replace", "path": "/spec/http/0/route", "value": [{"destination": {"host": "flask-service", "subset": "old"}}, {"destination": {"host": "flask-service", "subset": "canary"}}]}]' --type=json
                     '''
                 }
             }
