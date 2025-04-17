@@ -13,37 +13,36 @@ pipeline {
         DESTINATIONRULE = "k8s/rule.yaml"
     }
 
-    stage('GCP Auth, Terraform & Cluster Ready') {
-    steps {
-        withCredentials([file(credentialsId: 'gcp-key', variable: 'GOOGLE_APPLICATION_CREDENTIALS')]) {
-            dir('terraform') {
-                sh '''
-                echo " Authenticating with GCP"
-                gcloud auth activate-service-account --key-file=$GOOGLE_APPLICATION_CREDENTIALS
-                gcloud config set project $(terraform output -raw project_id)
+    stages {
+        stage('GCP Auth, Terraform & Cluster Ready') {
+            steps {
+                withCredentials([file(credentialsId: 'gcp-key', variable: 'GOOGLE_APPLICATION_CREDENTIALS')]) {
+                    dir('terraform') {
+                        sh '''
+                        echo " Authenticating with GCP"
+                        gcloud auth activate-service-account --key-file=$GOOGLE_APPLICATION_CREDENTIALS
+                        gcloud config set project $(terraform output -raw project_id)
 
-                echo "Running Terraform"
-                terraform init
-                terraform apply -auto-approve
+                        echo "Running Terraform"
+                        terraform init
+                        terraform apply -auto-approve
 
-                echo "Waiting for GKE cluster to be ready..."
-                CLUSTER_NAME=$(terraform output -raw cluster_name)
-                ZONE=$(terraform output -raw zone)
-                until gcloud container clusters describe "$CLUSTER_NAME" --zone "$ZONE" >/dev/null 2>&1; do
-                    echo "Cluster not ready yet. Sleeping 10s..."
-                    sleep 10
-                done
+                        echo "Waiting for GKE cluster to be ready..."
+                        CLUSTER_NAME=$(terraform output -raw cluster_name)
+                        ZONE=$(terraform output -raw zone)
+                        until gcloud container clusters describe "$CLUSTER_NAME" --zone "$ZONE" >/dev/null 2>&1; do
+                            echo "Cluster not ready yet. Sleeping 10s..."
+                            sleep 10
+                        done
 
-                echo "Cluster ready. Fetching credentials..."
-                gcloud container clusters get-credentials "$CLUSTER_NAME" --zone "$ZONE"
-                kubectl get nodes
-                '''
+                        echo "Cluster ready. Fetching credentials..."
+                        gcloud container clusters get-credentials "$CLUSTER_NAME" --zone "$ZONE"
+                        kubectl get nodes
+                        '''
+                    }
+                }
             }
         }
-    }
-}
-
-
 
         stage('Install Istio') {
             steps {
@@ -62,11 +61,9 @@ pipeline {
             steps {
                 script {
                     sh '''
-                    # Build Blue and Green Docker images
                     docker build -t $IMAGE_NAME-blue -f app/blue/Dockerfile app/blue
                     docker build -t $IMAGE_NAME-green -f app/green/Dockerfile app/green
-                    
-                    # Tag with build number
+
                     docker tag $IMAGE_NAME-blue sukanya996/$IMAGE_NAME:blue-$BUILD_NUMBER
                     docker tag $IMAGE_NAME-green sukanya996/$IMAGE_NAME:green-$BUILD_NUMBER
                     '''
@@ -78,7 +75,6 @@ pipeline {
             steps {
                 script {
                     sh '''
-                    # Push Docker images to Docker Hub
                     docker push sukanya996/$IMAGE_NAME:blue-$BUILD_NUMBER
                     docker push sukanya996/$IMAGE_NAME:green-$BUILD_NUMBER
                     '''
@@ -103,8 +99,6 @@ pipeline {
                     kubectl apply -f $BLUE_DEPLOY
                     kubectl apply -f $GREEN_DEPLOY
                     kubectl apply -f $SVC
-                    
-                    # Wait for deployments to stabilize
                     sleep 30
                     kubectl get svc
                     '''
@@ -161,5 +155,5 @@ pipeline {
                 }
             }
         }
-    }
-}
+    } // <-- closes stages
+} // <-- closes pipeline
