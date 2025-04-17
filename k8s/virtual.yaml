@@ -1,0 +1,17 @@
+apiVersion: networking.istio.io/v1alpha3
+kind: VirtualService
+metadata:
+  name: flask-service
+spec:
+  hosts:
+    - flask-service
+  http:
+    - route:
+        - destination:
+            host: flask-service
+            subset: old
+          weight: 90  # 90% traffic to Blue
+        - destination:
+            host: flask-service
+            subset: canary
+          weight: 10  # 10% traffic to Green (Canary)
