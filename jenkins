@@ -99,7 +99,7 @@ stage('Check GKE Connectivity') {
                 }
             }
         }
-    }
+    
 
 
         stage('Build Docker Images') {
