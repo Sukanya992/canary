@@ -2,9 +2,15 @@ pipeline {
     agent any
     environment {
         ZONE = "us-central1-c"
+        PROJECT_ID = "your-project-id"
         CLUSTER_NAME = "canary-cluster"
-        IMAGE_NAME = "bule-green"
         GOOGLE_APPLICATION_CREDENTIALS = credentials('gcp-key')
+        IMAGE_NAME = "canary-deploy"
+        GREEN_DEPLOY = "k8s/green.yaml"
+        BLUE_DEPLOY = "k8s/blue.yaml"
+        SVC = "k8s/svc.yaml"
+        VIRTUALSERVICE = "k8s/virtualservice.yaml"
+        DESTINATIONRULE = "k8s/destinationrule.yaml"
     }
 
     stages {
