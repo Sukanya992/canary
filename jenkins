@@ -11,6 +11,8 @@ pipeline {
         SVC = "k8s/svc.yaml"
         VIRTUALSERVICE = "k8s/virtualservice.yaml"
         DESTINATIONRULE = "k8s/destinationrule.yaml"
+        ISTIO_VERSION = '1.25.2'  // Set your Istio version here
+        ISTIO_PATH = '/var/lib/jenkins/workspace/canary/istio-${ISTIO_VERSION}'
     }
 
     stages {
