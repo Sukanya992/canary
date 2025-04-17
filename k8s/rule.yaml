@@ -1,0 +1,13 @@
+apiVersion: networking.istio.io/v1alpha3
+kind: DestinationRule
+metadata:
+  name: flask-service
+spec:
+  host: flask-service
+  subsets:
+    - name: old
+      labels:
+        version: old
+    - name: canary
+      labels:
+        version: canary
