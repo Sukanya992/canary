@@ -59,38 +59,47 @@ stage('Check GKE Connectivity') {
 }
 
    stage('Install Istio') {
-    steps {
-        sh '''
-        # Download Istio
-        curl -L https://istio.io/downloadIstio | ISTIO_VERSION=1.25.2 sh -
+            steps {
+                script {
+                    echo 'Downloading and Installing Istio...'
+                    sh '''
+                    # Download Istio
+                    curl -L https://istio.io/downloadIstio | ISTIO_VERSION=${ISTIO_VERSION} sh -
+                    cd ${ISTIO_PATH}
 
-        # Change directory to the Istio installation folder
-        cd istio-1.25.2
+                    # Add Istio binary directory to PATH
+                    export PATH=$PWD/bin:$PATH
 
-        # Add Istio binary directory to PATH
-        export PATH=$PWD/bin:$PATH
+                    # Check Kubernetes connectivity
+                    echo "Checking Kubernetes cluster connectivity..."
+                    kubectl get nodes || { echo "Cannot connect to the Kubernetes cluster"; exit 1; }
 
-        # Check Kubernetes connectivity
-        echo "Checking Kubernetes cluster connectivity..."
-        kubectl get nodes || { echo "Cannot connect to the Kubernetes cluster"; exit 1; }
+                    # Check Istio CLI version
+                    echo "Checking Istio installation prerequisites..."
+                    istioctl version --remote=false || { echo "Istioctl not working"; exit 1; }
 
-        # Check Istio CLI version
-        echo "Checking Istio installation prerequisites..."
-        istioctl version --remote=false || { echo "Istioctl not working"; exit 1; }
+                    # Install or Reinstall Istio with extended timeout for CNI
+                    echo "Checking for existing Istio pods..."
+                    if ! kubectl get pods -n istio-system 2>/dev/null | grep -q 'istiod'; then
+                        echo "Installing or re-installing Istio with extended CNI timeout..."
+                        istioctl install --set profile=demo --set components.cni.enabled=true --set cni.timeout=10m -y
+                    else
+                        echo "Istio is already installed"
+                    fi
 
-        # Install or Reinstall Istio
-        echo "Checking for existing Istio pods..."
-        if ! kubectl get pods -n istio-system 2>/dev/null | grep -q 'istiod'; then
-            echo "Installing or re-installing Istio..."
-            istioctl install --set profile=demo -y
-        else
-            echo "Istio is already running"
-        fi
-        '''
+                    # Wait for Istio components to be installed
+                    echo "Waiting for Istio components to be installed..."
+                    kubectl wait --for=condition=ready pod -n istio-system --selector=app=istiod --timeout=10m || { echo "Istio control plane (istiod) failed to install"; exit 1; }
+                    kubectl wait --for=condition=ready pod -n istio-system --selector=app=istio-ingressgateway --timeout=10m || { echo "Istio ingress gateway failed to install"; exit 1; }
+
+                    # Ensure Istio CNI is installed and ready
+                    kubectl get daemonset -n kube-system istio-cni-node || { echo "Istio CNI node daemonset not found"; exit 1; }
+                    kubectl wait --for=condition=ready daemonset -n kube-system istio-cni-node --timeout=10m || { echo "Istio CNI failed to start"; exit 1; }
+                    '''
+                }
+            }
+        }
     }
-}
-
-
 
 
         stage('Build Docker Images') {
