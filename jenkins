@@ -40,17 +40,26 @@ pipeline {
         }
 
         stage('Install Istio') {
-            steps {
-                script {
-                    sh '''
-                    curl -L https://istio.io/downloadIstio | sh -
-                    export PATH=$PWD/istio-*/bin:$PATH
-                    istioctl install --set profile=default -y
-                    kubectl label namespace default istio-injection=enabled
-                    '''
-                }
-            }
-        }
+    steps {
+        sh '''
+        # Download Istio
+        curl -L https://istio.io/downloadIstio | ISTIO_VERSION=1.25.2 sh -
+
+        # Change directory to the Istio installation folder
+        cd istio-1.25.2
+
+        # Add Istio binary directory to PATH
+        export PATH=$PWD/bin:$PATH
+
+        # Verify istioctl is available
+        istioctl version
+
+        # Install Istio with the default profile
+        istioctl install --set profile=default -y
+        '''
+    }
+}
+
 
         stage('Build Docker Images') {
             steps {
