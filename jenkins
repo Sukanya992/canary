@@ -2,8 +2,8 @@ pipeline {
     agent any
     environment {
         ZONE = "us-central1-c"
-        PROJECT_ID = "your-project-id"
-        CLUSTER_NAME = "canary-cluster"
+        PROJECT_ID = "plated-epigram-452709-h6"
+        CLUSTER_NAME = "cluster-2"
         GOOGLE_APPLICATION_CREDENTIALS = credentials('gcp-key')
         IMAGE_NAME = "canary-deploy"
         GREEN_DEPLOY = "k8s/green.yaml"
