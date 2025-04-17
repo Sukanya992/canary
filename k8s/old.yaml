@@ -1,0 +1,26 @@
+apiVersion: apps/v1
+kind: Deployment
+metadata:
+  name: flask-old
+  labels:
+    app: flask
+    version: old
+spec:
+  replicas: 1
+  selector:
+    matchLabels:
+      app: flask
+      version: old
+  template:
+    metadata:
+      labels:
+        app: flask
+        version: old
+      annotations:
+        sidecar.istio.io/inject: "true"  # Enable Istio sidecar injection
+    spec:
+      containers:
+        - name: flask
+          image: sukanya996/canary-deploy:old-$(BUILD_NUMBER)
+          ports:
+            - containerPort: 5000
