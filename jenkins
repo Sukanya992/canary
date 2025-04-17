@@ -44,9 +44,9 @@ pipeline {
                 script {
                     sh '''
                     curl -L https://istio.io/downloadIstio | sh -
-                    export PATH=$PWD/istio-*/bin:$PATH
+                    ISTIO_DIR=$(find . -maxdepth 1 -type d -name "istio-*")
+                    export PATH="$PATH:$ISTIO_DIR/bin"
                     istioctl install --set profile=default -y
-                    kubectl label namespace default istio-injection=enabled
                     '''
                 }
             }
